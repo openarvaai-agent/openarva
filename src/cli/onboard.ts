@@ -1,0 +1,179 @@
+import { intro, outro, select, text, note, cancel } from '@clack/prompts';
+import { saveOpenArvaConfig, type OpenArvaProviderName } from '../config/env.js';
+
+export function renderCliHelp() {
+  console.log(`
+OpenArva CLI
+
+Usage: openarva [command] [options]
+
+Commands:
+  init, setup     Start the interactive setup wizard
+  run             Run a task in a domain
+  resume          Resume an autonomous task by ID, or use --pending
+  doctor          Run environment and provider diagnostics
+  fix             Diagnose and repair repository issues safely
+  status          Show provider, model, port, and bridge status
+  batch           Bulk-process text/document files in a directory
+  crawl           Index GitHub repositories or Telegram exports locally
+  learn           Index local docs/context into the on-device memory bank
+  usage           Show usage dashboard and export billing statements
+  update          Discover provider models; use --models for local pulls and benchmarks
+  mode            Select a specialized design, education, or developer workflow
+  tasks           View persistent task and workflow memory
+  service         Manage background service / Windows auto-start (install, start, run, status)
+  commit          Prepare a commit message or workflow summary
+  serve           Start HTTP/WebSocket gateway and remote mobile bridge
+  demo            Run a quick no-key demo mode
+  sponsor         Show public sponsorship and donation channels
+  start           Start the background task daemon
+  daemon          Run the task daemon in the foreground
+  gateway         Manage multi-channel gateway (start, stop, status, daemon)
+  dashboard       Start gateway and open the local dashboard
+  help            Show this help message
+
+Examples:
+  openarva init
+  openarva doctor
+  openarva status
+  openarva batch --dir ./documents
+  openarva crawl git owner/repository
+  openarva crawl telegram --file ./telegram-export.json
+  openarva learn --index ./
+  openarva learn --forget
+  openarva usage
+  openarva update --models
+  openarva mode design "Create a dashboard wireframe"
+  openarva mode edu "Build a lesson plan"
+  openarva mode dev "Scan this API for vulnerabilities"
+  openarva start
+  openarva sponsor
+  openarva tasks
+  openarva service install
+  openarva commit "feat: improve AI workflow"
+  openarva serve --port 3000
+  openarva fix "Resolve TypeScript errors"
+  openarva run --domain coding --instruction "Build a simple API"
+  openarva run --autonomous --instruction "Research this repository and report risks"
+  openarva resume <task-id>
+  openarva resume --pending
+  openarva gateway start
+  openarva gateway stop
+  openarva gateway status
+  openarva gateway daemon
+  openarva dashboard
+
+Supported providers:
+  openai, anthropic, gemini, groq, deepseek, ollama, local, lmstudio
+
+Community & support:
+  Telegram: https://t.me/openrva177
+  WhatsApp: https://whatsapp.com/channel/0029Vb8TDKr72WTmtjfWju2s
+  Issues: https://github.com/openarvaai-agent/openarva/issues
+
+Environment auto-detection:
+  Flutter/Dart, Node.js/TypeScript, Python, Go, Rust
+`);
+}
+
+export async function runOnboarding() {
+  intro('OpenArva Setup Wizard');
+
+  const providerResult = await select({
+    message: 'Choose your default AI provider',
+    options: [
+      { value: 'openai', label: 'OpenAI' },
+      { value: 'anthropic', label: 'Anthropic Claude' },
+      { value: 'gemini', label: 'Google Gemini' },
+      { value: 'groq', label: 'Groq' },
+      { value: 'deepseek', label: 'DeepSeek' },
+      { value: 'ollama', label: 'Ollama / Local AI' },
+      { value: 'local', label: 'Local AI (generic)' },
+      { value: 'lmstudio', label: 'LM Studio' },
+    ],
+  });
+
+  if (providerResult === undefined || providerResult === null || typeof providerResult !== 'string') {
+    cancel('OpenArva setup cancelled.');
+    return;
+  }
+
+  const selectedProvider = providerResult as OpenArvaProviderName;
+
+  const modelResult = await text({
+    message: 'Enter the model name to use by default',
+    placeholder: selectedProvider === 'openai' ? 'gpt-4o' : selectedProvider === 'anthropic' ? 'claude-3-5-sonnet' : selectedProvider === 'gemini' ? 'gemini-2.0-flash' : selectedProvider === 'groq' ? 'llama-3.3-70b-versatile' : selectedProvider === 'deepseek' ? 'deepseek-chat' : 'llama3.1',
+    defaultValue: selectedProvider === 'openai' ? 'gpt-4o' : selectedProvider === 'anthropic' ? 'claude-3-5-sonnet' : selectedProvider === 'gemini' ? 'gemini-2.0-flash' : selectedProvider === 'groq' ? 'llama-3.3-70b-versatile' : selectedProvider === 'deepseek' ? 'deepseek-chat' : 'llama3.1',
+  });
+  const model = typeof modelResult === 'string' ? modelResult : String(modelResult);
+
+  const baseUrlValue = await text({
+    message: 'Base URL (optional, for OpenAI-compatible endpoints or local servers)',
+    placeholder: selectedProvider === 'ollama' || selectedProvider === 'local' ? 'http://localhost:11434/v1' : selectedProvider === 'lmstudio' ? 'http://localhost:1234/v1' : 'https://api.example.com/v1',
+    defaultValue: selectedProvider === 'ollama' || selectedProvider === 'local' ? 'http://localhost:11434/v1' : selectedProvider === 'lmstudio' ? 'http://localhost:1234/v1' : '',
+  });
+  const baseUrl = typeof baseUrlValue === 'string' ? baseUrlValue : String(baseUrlValue);
+
+  const organizationName = await text({
+    message: 'Organization name / institution (optional)',
+    placeholder: 'OpenArva Lab',
+    defaultValue: '',
+  });
+
+  const developerId = await text({
+    message: 'Developer ID / user identity (optional)',
+    placeholder: 'dev-001',
+    defaultValue: '',
+  });
+
+  const localAiEnabled = await select({
+    message: 'Configure a local LLM endpoint now?',
+    options: [
+      { value: 'yes', label: 'Yes - Ollama, LM Studio, or another local endpoint' },
+      { value: 'no', label: 'No - configure it later' },
+    ],
+    initialValue: selectedProvider === 'ollama' || selectedProvider === 'local' || selectedProvider === 'lmstudio' ? 'yes' : 'no',
+  });
+
+  let localAi: { enabled?: boolean; baseUrl?: string; model?: string } | undefined;
+  if (localAiEnabled === 'yes') {
+    const localUrl = await text({
+      message: 'Local LLM base URL',
+      placeholder: 'http://127.0.0.1:11434/v1',
+      defaultValue: selectedProvider === 'lmstudio' ? 'http://127.0.0.1:1234/v1' : 'http://127.0.0.1:11434/v1',
+    });
+    const localModel = await text({
+      message: 'Local LLM model name',
+      placeholder: 'llama3.1',
+      defaultValue: model || 'llama3.1',
+    });
+    localAi = { enabled: true, baseUrl: String(localUrl), model: String(localModel) };
+  }
+
+  const repositoryPaths = await text({
+    message: 'Repository paths to index later (optional, comma-separated)',
+    placeholder: 'C:/projects/app, ./workspace',
+    defaultValue: '',
+  });
+
+  const config = {
+    provider: selectedProvider,
+    model: model,
+    baseUrl: baseUrl || undefined,
+    organizationName: typeof organizationName === 'string' ? organizationName : String(organizationName || ''),
+    developerId: typeof developerId === 'string' ? developerId : String(developerId || ''),
+    localAi,
+    repositoryPaths: typeof repositoryPaths === 'string' && repositoryPaths.trim()
+      ? repositoryPaths.split(',').map((item) => item.trim()).filter(Boolean)
+      : [],
+  };
+
+  saveOpenArvaConfig(config);
+
+  note(
+    `Provider settings saved to .openarva/config.json\nProvider credentials are read from your ignored .env file.\nProvider: ${selectedProvider}\nModel: ${model}`,
+    'Setup complete',
+  );
+
+  outro('OpenArva is ready. Run: openarva run --domain coding --instruction "Build a simple API"');
+}

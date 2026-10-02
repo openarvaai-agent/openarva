@@ -1,0 +1,95 @@
+{
+  "name": "@openarvaai/agent",
+  "version": "17.6.24",
+  "description": "Personal AI agent for coding, research, and safety-gated automation",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openarvaai-agent/openarva.git"
+  },
+  "type": "module",
+  "bin": {
+    "openarva": "bin/openarva.js",
+    "openarvaai": "bin/openarva.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "assets"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "vitest run",
+    "desktop:build": "npm run build && electron-builder --win --linux",
+    "desktop:win": "npm run build && electron-builder --win",
+    "desktop:linux": "npm run build && electron-builder --linux"
+  },
+  "bugs": {
+    "url": "https://github.com/openarvaai-agent/openarva/issues"
+  },
+  "homepage": "https://github.com/openarvaai-agent/openarva#readme",
+  "keywords": [
+    "openarva",
+    "openarva-plugin",
+    "openarva-connector",
+    "ai-agent",
+    "multi-model",
+    "autonomous-agent"
+  ],
+  "dependencies": {
+    "@ai-sdk/anthropic": "^0.0.39",
+    "@ai-sdk/google": "^0.0.36",
+    "@ai-sdk/mistral": "^0.0.30",
+    "@ai-sdk/openai": "^0.0.66",
+    "@anthropic-ai/sdk": "^0.26.0",
+    "@clack/prompts": "^0.7.0",
+    "@google/generative-ai": "^0.21.0",
+    "@mistralai/mistralai": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@mozilla/readability": "^0.5.0",
+    "ai": "^3.4.33",
+    "better-sqlite3": "^13.0.3",
+    "chalk": "^5.3.0",
+    "chokidar": "^3.6.0",
+    "commander": "^12.0.0",
+    "croner": "^8.0.0",
+    "cross-spawn": "^7.0.3",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "grammy": "^1.26.0",
+    "imapflow": "^2.0.5",
+    "jsdom": "^24.1.0",
+    "linkedom": "^0.18.0",
+    "mailparser": "^3.9.28",
+    "node-edge-tts": "^1.2.2",
+    "openai": "^4.55.0",
+    "ora": "^9.4.1",
+    "pdfkit": "^0.15.0",
+    "playwright-core": "^1.46.0",
+    "proper-lockfile": "^4.1.2",
+    "qrcode": "^1.5.3",
+    "twilio": "^5.3.0",
+    "ws": "^8.18.0",
+    "xlsx": "^0.18.5",
+    "yaml": "^2.5.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^4.17.21",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^20.14.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "@types/ws": "^8.5.10",
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
