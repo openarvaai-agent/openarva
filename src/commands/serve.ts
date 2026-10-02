@@ -4,6 +4,7 @@ import { Bot } from 'grammy';
 import { normalizePathForPlatform } from '../utils/platform.js';
 import { OpenArvaAgent } from '../engine/agent.js';
 import { listTasks } from './state.js';
+import { FixedWindowRateLimiter } from '../security/rateLimit.js';
 
 const agent = new OpenArvaAgent();
 
@@ -75,11 +76,19 @@ export async function serveCommand(port = 3000) {
   if (!Number.isInteger(resolvedPort) || resolvedPort < 1 || resolvedPort > 65535) {
     throw new Error(`Invalid port: ${port}. Expected an integer from 1 to 65535.`);
   }
+  const host = process.env.OPENARVA_HOST || '127.0.0.1';
+  const isLoopbackHost = host === '127.0.0.1' || host === '::1' || host === 'localhost';
+  if (!isLoopbackHost && !process.env.OPENARVA_AUTH_KEY) throw new Error('OPENARVA_AUTH_KEY is required before binding the serve gateway to a non-loopback host.');
+  const rateLimiter = new FixedWindowRateLimiter(60, 60_000, 10_000);
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
     if (req.method === 'GET' && url.pathname === '/dashboard') {
+      if (!isAuthorized(req)) {
+        sendJson(res, 401, { ok: false, error: 'Unauthorized' });
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(dashboardHtml());
       return;
@@ -96,6 +105,10 @@ export async function serveCommand(port = 3000) {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/status') {
+      if (!isAuthorized(req)) {
+        sendJson(res, 401, { ok: false, error: 'Unauthorized' });
+        return;
+      }
       sendJson(res, 200, {
         ok: true,
         service: 'openarva',
@@ -113,6 +126,10 @@ export async function serveCommand(port = 3000) {
     }
 
     if (req.method === 'POST' && url.pathname === '/api/v1/chat') {
+      if (!rateLimiter.allow(req.socket.remoteAddress || '')) {
+        sendJson(res, 429, { ok: false, error: 'Rate limit exceeded.' });
+        return;
+      }
       if (!isAuthorized(req)) {
         sendJson(res, 401, { ok: false, error: 'Unauthorized' });
         return;
@@ -149,6 +166,11 @@ export async function serveCommand(port = 3000) {
     }));
 
     socket.on('message', async (message) => {
+      if (!rateLimiter.allow(request.socket.remoteAddress || '')) {
+        socket.send(JSON.stringify({ type: 'error', error: 'Rate limit exceeded.' }));
+        socket.close(1008, 'Rate limit exceeded');
+        return;
+      }
       const stringMessage = message.toString();
       try {
         const data = JSON.parse(stringMessage);
@@ -172,9 +194,9 @@ export async function serveCommand(port = 3000) {
 
   maybeStartTelegramGateway();
 
-  server.listen(resolvedPort, () => {
-    console.log(`OpenArva serve is listening on http://localhost:${resolvedPort}`);
-    console.log(`WebSocket gateway ready at ws://localhost:${resolvedPort}/ws`);
+  server.listen(resolvedPort, host, () => {
+    console.log(`OpenArva serve is listening on http://${host}:${resolvedPort}`);
+    console.log(`WebSocket gateway ready at ws://${host}:${resolvedPort}/ws`);
     if (process.env.TELEGRAM_BOT_TOKEN) {
       console.log('Telegram Bot Gateway: configured via TELEGRAM_BOT_TOKEN');
     } else {

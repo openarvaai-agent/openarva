@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 dotenv.config();
 
@@ -70,17 +70,35 @@ export function getProviderConfig(provider = process.env.OPENARVA_PROVIDER || 'o
 }
 
 export function getOpenArvaConfigPath() {
-  return join(homedir(), '.openarva', 'config.json');
+  const configuredPath = process.env.OPENARVA_CONFIG_PATH?.trim();
+  if (configuredPath) return resolve(configuredPath);
+
+  const homeConfig = join(homedir(), '.openarva', 'config.json');
+  const workspaceConfig = join(process.cwd(), '.openarva', 'config.json');
+  if (existsSync(homeConfig)) return homeConfig;
+  if (existsSync(workspaceConfig)) return workspaceConfig;
+  return homeConfig;
 }
 
 export function loadOpenArvaConfig() {
   const configPath = getOpenArvaConfigPath();
   if (!existsSync(configPath)) return {};
   try {
-    return JSON.parse(readFileSync(configPath, 'utf8'));
+    const { apiKey: _apiKey, telegramBotToken: _telegramBotToken, ...safeConfig } = JSON.parse(readFileSync(configPath, 'utf8'));
+    return safeConfig;
   } catch {
     return {};
   }
+}
+
+export function saveOpenArvaConfig(config) {
+  const configPath = getOpenArvaConfigPath();
+  mkdirSync(dirname(configPath), { recursive: true });
+  const { apiKey: _apiKey, telegramBotToken: _telegramBotToken, ...safeConfig } = config;
+  writeFileSync(configPath, JSON.stringify({
+    ...safeConfig,
+    privacy: safeConfig.privacy || { localOnly: false, redactPii: true, auditLog: true },
+  }, null, 2), 'utf8');
 }
 
 export const config = {

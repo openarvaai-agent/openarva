@@ -1,5 +1,20 @@
 declare function askOpenArva(message: string): Promise<string>;
-declare function executeCommand(command: string): Promise<string>;
+import { FixedWindowRateLimiter } from '../security/rateLimit.js';
+import { fetchPublicHttp } from '../security/network.js';
+
+async function telegramRequest<T>(token: string, method: string, payload?: Record<string, unknown>, signal?: AbortSignal) {
+  const url = `https://api.telegram.org/bot${token}/${method}${method === 'getUpdates' && payload ? `?${new URLSearchParams(Object.entries(payload).map(([key, value]) => [key, String(value)]))}` : ''}`;
+  const response = await fetchPublicHttp(url, {
+    ...(payload && method !== 'getUpdates' ? { method: 'POST' as const, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) } : {}),
+    signal,
+    allowJson: true,
+    maxBytes: 1_000_000,
+    maxRedirects: 0,
+  });
+  const result = JSON.parse(response.body.toString('utf8')) as { ok: boolean; result: T; description?: string };
+  if (!result.ok) throw new Error(result.description || `Telegram API ${method} failed.`);
+  return result.result;
+}
 
 export function startBot() {
   const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -7,9 +22,14 @@ export function startBot() {
     console.log('⚠️ [Telegram] No token provided, Telegram bot disabled.');
     return;
   }
+  const allowedChatIds = new Set((process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map((id) => id.trim()).filter(Boolean));
+  if (allowedChatIds.size === 0) {
+    console.warn('⚠️ [Telegram] Inbound processing disabled: configure TELEGRAM_ALLOWED_CHAT_IDS with trusted chat IDs.');
+    return;
+  }
 
-  const api = `https://api.telegram.org/bot${token}`;
   let offset = 0;
+  const rateLimiter = new FixedWindowRateLimiter(30, 60_000);
 
   console.log('🤖 [OpenArva Telegram Bot] Starting...');
   console.log('💬 Listening for messages on Telegram...');
@@ -18,41 +38,39 @@ export function startBot() {
   const poll = async () => {
     while (true) {
       try {
-        const response = await fetch(`${api}/getUpdates?timeout=30&offset=${offset}`);
-        const data = await response.json() as {
-          ok: boolean;
-          result: Array<{ update_id: number; message?: { chat: { id: number }; text?: string } }>;
-        };
+        const updates = await telegramRequest<Array<{ update_id: number; message?: { chat: { id: number }; text?: string } }>>(
+          token,
+          'getUpdates',
+          { timeout: 20, offset, allowed_updates: '["message"]' },
+          AbortSignal.timeout(25_000),
+        );
 
-        if (data.ok && data.result) {
-          for (const update of data.result) {
+        if (updates) {
+          for (const update of updates) {
             offset = update.update_id + 1;
             const message = update.message;
             if (!message?.text) continue;
 
-            console.log(`📨 [Telegram] Message: "${message.text.substring(0, 50)}..."`);
+            const chatId = String(message.chat.id);
+            if (!allowedChatIds.has(chatId) || !rateLimiter.allow(chatId)) {
+              console.warn(`[Telegram] Ignored message from unauthorized or rate-limited chat ${chatId}.`);
+              continue;
+            }
+            console.log(`[Telegram] Accepted message from chat ${chatId} (${message.text.length} characters).`);
 
             const userMsg = message.text;
             let reply: string;
 
             if (userMsg.startsWith('/cmd ')) {
-              const command = userMsg.replace('/cmd ', '');
-              console.log(`⚙️ Executing: ${command}`);
-              const output = await executeCommand(command);
-              reply = `✅ Command Output:\n\`\`\`\n${output}\n\`\`\``;
+              reply = 'Remote command execution is disabled. Use OpenArva locally for approval-gated system actions.';
             } else {
-              console.log(`🧠 Processing with AI...`);
+              console.log('[Telegram] Processing approved chat message.');
               reply = await askOpenArva(userMsg);
             }
 
-            // Send reply to Telegram user
-            await fetch(`${api}/sendMessage`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: message.chat.id,
-                text: reply,
-              }),
+            await telegramRequest(token, 'sendMessage', {
+              chat_id: message.chat.id,
+              text: reply.slice(0, 4096),
             });
           }
         }

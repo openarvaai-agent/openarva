@@ -2,9 +2,13 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { auditEnterpriseEvent, requirePermission, type EnterpriseRole } from '../security/auditLogger.js';
 import { sanitizeSensitiveData } from '../security/sanitizer.js';
+import { verifySignedWebhook, type ReplayGuard } from '../security/webhookSecurity.js';
+import { FixedWindowRateLimiter } from '../security/rateLimit.js';
 
-export interface WebhookRequest { method: string; path: string; headers: Record<string, string | undefined>; body: string; role: EnterpriseRole; actor: string; }
+export interface WebhookRequest { method: string; path: string; headers: Record<string, string | undefined>; body: string; role: EnterpriseRole; actor: string; clientId?: string; }
 export interface WebhookResponse { status: number; body: Record<string, unknown>; }
+
+const enterpriseWebhookLimiter = new FixedWindowRateLimiter(60, 60_000, 10_000);
 
 export function verifyWebhookSignature(body: string, signature: string | undefined, secret: string) {
   if (!signature || !secret) return false;
@@ -20,10 +24,22 @@ export function parseWebhookBody(body: string, contentType = ''): Record<string,
   return Object.fromEntries(new URLSearchParams(body).entries());
 }
 
-export async function handleEnterpriseWebhook(request: WebhookRequest, options: { secret: string; handler: (payload: Record<string, unknown>) => Promise<unknown>; requiredPermission?: 'customer:read' | 'customer:write' | 'payment:read' | 'payment:write' }) : Promise<WebhookResponse> {
+export async function handleEnterpriseWebhook(request: WebhookRequest, options: { secret: string; handler: (payload: Record<string, unknown>) => Promise<unknown>; requiredPermission?: 'customer:read' | 'customer:write' | 'payment:read' | 'payment:write'; replayGuard?: ReplayGuard; rateLimiter?: FixedWindowRateLimiter }) : Promise<WebhookResponse> {
   try {
+    if (!(options.rateLimiter || enterpriseWebhookLimiter).allow(request.clientId || request.actor)) {
+      auditEnterpriseEvent({ action: `webhook:${request.path}`, actor: request.actor, role: request.role, outcome: 'denied', details: { reason: 'rate_limit' } });
+      return { status: 429, body: { ok: false, error: 'Rate limit exceeded.' } };
+    }
     if (request.method !== 'POST') return { status: 405, body: { ok: false, error: 'Method not allowed' } };
-    if (!verifyWebhookSignature(request.body, request.headers['x-openarva-signature'] || request.headers['x-hub-signature-256'], options.secret)) return { status: 401, body: { ok: false, error: 'Invalid signature' } };
+    const signature = verifySignedWebhook({
+      body: request.body,
+      secret: options.secret,
+      signature: request.headers['x-openarva-signature'],
+      timestamp: request.headers['x-openarva-timestamp'],
+      nonce: request.headers['x-openarva-nonce'],
+      replayGuard: options.replayGuard,
+    });
+    if (!signature.ok) return { status: signature.reason === 'replay' ? 409 : 401, body: { ok: false, error: signature.reason } };
     if (options.requiredPermission) requirePermission(request.role, options.requiredPermission);
     const payload = parseWebhookBody(request.body, request.headers['content-type']);
     const safePayload = JSON.parse(sanitizeSensitiveData(JSON.stringify(payload)).text) as Record<string, unknown>;

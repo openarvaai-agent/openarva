@@ -4,10 +4,13 @@ import { hasPermission, requirePermission } from './auditLogger.js';
 
 describe('enterprise security controls', () => {
   it('redacts valid payment and credential data', () => {
-    const result = sanitizeSensitiveData('Card 4111 1111 1111 1111, PIN: 1234, account 1234567890');
+    const result = sanitizeSensitiveData('Card 4111 1111 1111 1111, PIN: 1234, account 1234567890, OPENAI_API_KEY=sk-test-secret, Authorization: Bearer abc.def');
     expect(result.text).toContain('[REDACTED_CREDIT_CARD:1111]');
     expect(result.text).toContain('[REDACTED_PIN]');
     expect(result.text).toContain('[REDACTED_BANK_ACCOUNT]');
+    expect(result.text).not.toContain('sk-test-secret');
+    expect(result.text).not.toContain('abc.def');
+    expect(result.text.match(/\[REDACTED_SECRET\]/g)).toHaveLength(2);
   });
 
   it('enforces role permissions', () => {

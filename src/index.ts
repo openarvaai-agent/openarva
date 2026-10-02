@@ -159,7 +159,7 @@ async function main() {
 
     const dirIndex = args.findIndex((arg) => arg === '--index' || arg === '-i');
     const dir = dirIndex >= 0 ? args[dirIndex + 1] : process.cwd();
-    const records = indexMemoryFromDirectory(dir);
+    const records = await indexMemoryFromDirectory(dir);
     console.log(`Indexed ${records.length} memories into the local memory bank.`);
     return;
   }
@@ -214,6 +214,19 @@ async function main() {
   }
 
   if (command === 'run') {
+    const resumeIndex = args.findIndex((arg) => arg === '--resume');
+    if (resumeIndex >= 0) {
+      const taskId = args[resumeIndex + 1];
+      if (!taskId) {
+        console.error('Usage: openarva run --resume <task-id>');
+        process.exitCode = 1;
+        return;
+      }
+      const result = await agent.resumeAutonomousTask(taskId);
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
     const domainIndex = args.findIndex((arg) => arg === '-d' || arg === '--domain');
     const instructionIndex = args.findIndex((arg) => arg === '-i' || arg === '--instruction');
     const domains = ['coding', 'agriculture', 'accounting', 'documents', 'research', 'engineering', 'medicine'] as const;
@@ -225,8 +238,31 @@ async function main() {
       ? args[instructionIndex + 1]
       : 'Initialize OpenArva Environment Checks';
 
+    if (args.includes('--autonomous')) {
+      const result = await agent.executeAutonomousTask(instruction);
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
     const result = await agent.executeTask({ domain, instruction });
     console.log(result);
+    return;
+  }
+
+  if (command === 'resume') {
+    const taskId = args[1];
+    if (taskId === '--pending') {
+      const results = await agent.resumeRecoverableAutonomousTasks();
+      console.log(JSON.stringify(results, null, 2));
+      return;
+    }
+    if (!taskId) {
+      console.error('Usage: openarva resume <task-id> | openarva resume --pending');
+      process.exitCode = 1;
+      return;
+    }
+    const result = await agent.resumeAutonomousTask(taskId);
+    console.log(JSON.stringify(result, null, 2));
     return;
   }
 

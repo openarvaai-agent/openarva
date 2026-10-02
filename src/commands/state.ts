@@ -163,18 +163,28 @@ export function getPreference(key: string) {
   return loadState().preferences[key] || '';
 }
 
-export async function confirmExecutionApproval(actionDescription: string, autoBypass = false): Promise<boolean> {
-  const shouldBypass = autoBypass || process.argv.includes('--yes') || process.argv.includes('--force');
-  if (shouldBypass) {
-    return true;
-  }
-
+export async function confirmExecutionApproval(actionDescription: string): Promise<boolean> {
   if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const answer = await new Promise<string>((resolve) => {
     console.log(chalk.yellow(`Action preview: ${actionDescription}`));
     rl.question(chalk.yellow('Do you approve executing this action? (y/N) '), (value) => {
+      rl.close();
+      resolve(value.trim());
+    });
+  });
+
+  return /^y(es)?$/i.test(answer);
+}
+
+export async function confirmAutonomousExecutionApproval(actionDescription: string): Promise<boolean> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await new Promise<string>((resolve) => {
+    console.log(chalk.yellow(`Autonomous action requires approval: ${actionDescription}`));
+    rl.question(chalk.yellow('Approve this action? (y/N) '), (value) => {
       rl.close();
       resolve(value.trim());
     });

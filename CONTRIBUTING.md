@@ -20,7 +20,7 @@ Requirements:
 - Optional: Electron build prerequisites for desktop packages
 
 ```bash
-git clone https://github.com/fekerulegese10-arch/openarva.git
+git clone https://github.com/openarvaai-agent/openarva.git
 cd openarva
 npm install
 npm run build
@@ -54,7 +54,7 @@ Native SQLite and Electron packages may run install scripts. Review npm's script
 Third-party connectors and tools can use the contracts exported by `src/plugins/index.ts`:
 
 ```ts
-import type { OpenArvaPlugin } from 'openarva/dist/plugins/index.js';
+import type { OpenArvaPlugin } from '@openarvaai/agent/dist/plugins/index.js';
 
 const plugin: OpenArvaPlugin = {
   name: 'example-plugin',
@@ -70,6 +70,28 @@ export default plugin;
 ```
 
 Connectors must implement the gateway connector contract and tools should validate input, avoid leaking secrets, and return structured results where practical.
+
+### Adding an autonomous tool
+
+Autonomous tools use a Zod schema and explicit permission classification. Register one on an `OpenArvaAgent` instance:
+
+```ts
+import { z } from 'zod';
+import { OpenArvaAgent } from '@openarvaai/agent/dist/engine/agent.js';
+
+const agent = new OpenArvaAgent();
+agent.registerAutonomousTool({
+  name: 'inventory.lookup',
+  description: 'Read one inventory record by SKU.',
+  permission: 'READ_ONLY',
+  inputSchema: z.object({ sku: z.string().min(1) }).strict(),
+  idempotent: true,
+  timeoutMs: 5000,
+  execute: async ({ sku }, { signal }) => inventoryApi.lookup(sku, { signal }),
+});
+```
+
+The executor parses inputs before calling a tool and supplies an `AbortSignal` for timeouts. Only idempotent operations may be retried. Use `MODERATE` or `HIGH_RISK` for external side effects; autonomous approvals require an interactive human response and cannot be bypassed by `--yes` or `--force`. Never register destructive or financial behavior as `SAFE`.
 
 ## Pull requests
 

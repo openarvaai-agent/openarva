@@ -73,14 +73,13 @@ export function recordAudit(action: string, details: string, userIdentity?: stri
 }
 
 export function resolveEffectiveProvider(provider?: string) {
+  if (isLocalOnlyMode()) return process.env.LOCAL_AI_PROVIDER || 'ollama';
   const config = loadOpenArvaConfig();
-  const privacyMode = config.privacy?.localOnly === true || process.env.OPENARVA_LOCAL_ONLY === 'true';
-
-  if (privacyMode) {
-    return 'ollama';
-  }
-
   return provider || config.provider || process.env.OPENARVA_PROVIDER || 'openai';
+}
+
+export function isLocalOnlyMode() {
+  return loadOpenArvaConfig().privacy?.localOnly === true || process.env.OPENARVA_LOCAL_ONLY === 'true';
 }
 
 export function sanitizePromptForTransmission(prompt: string, provider?: string) {

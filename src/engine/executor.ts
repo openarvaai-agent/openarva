@@ -8,6 +8,7 @@ export interface TerminalExecutionOptions {
   retryDelayMs?: number;
   maxOutputBytes?: number;
   shell?: boolean;
+  signal?: AbortSignal;
   repair?: (failure: TerminalAttempt) => Promise<{ command?: string; args?: string[] } | void>;
 }
 
@@ -40,7 +41,7 @@ function wait(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-async function runAttempt(command: string, args: string[], options: Required<Pick<TerminalExecutionOptions, 'cwd' | 'env' | 'timeoutMs' | 'maxOutputBytes' | 'shell'>>, attempt: number): Promise<TerminalAttempt> {
+async function runAttempt(command: string, args: string[], options: Required<Pick<TerminalExecutionOptions, 'cwd' | 'env' | 'timeoutMs' | 'maxOutputBytes' | 'shell'>> & Pick<TerminalExecutionOptions, 'signal'>, attempt: number): Promise<TerminalAttempt> {
   const started = Date.now();
   return new Promise((resolve, reject) => {
     let child;
@@ -49,6 +50,7 @@ async function runAttempt(command: string, args: string[], options: Required<Pic
         cwd: options.cwd,
         env: options.env,
         shell: options.shell,
+        signal: options.signal,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -90,6 +92,7 @@ export async function executeCommandDetailed(command: string, args: string[] = [
     timeoutMs: clampPositive(options.timeoutMs, 120_000),
     maxOutputBytes: clampPositive(options.maxOutputBytes, 200_000),
     shell: options.shell ?? false,
+    signal: options.signal,
   };
   const history: TerminalAttempt[] = [];
 

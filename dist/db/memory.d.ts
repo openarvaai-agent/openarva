@@ -7,7 +7,7 @@ export declare class OpenArvaMemory {
     constructor();
     private loadMemory;
     saveConversation(role: 'user' | 'assistant', content: string): void;
-    recordUserPreference(key: string, value: any, importance?: number): void;
+    recordUserPreference(key: string, value: any, importance?: number): Promise<void>;
     getUserPreference(key: string): any;
     recordMetric(metricName: string, value: number): void;
     getRecentContext(limit?: number): string;

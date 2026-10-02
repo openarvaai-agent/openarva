@@ -1,10 +1,14 @@
 import { execSync } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import chalk from 'chalk';
 import { routeAiCompletion } from '../ai/providers.js';
+import { getOpenArvaConfigPath, normalizeProvider } from '../config/env.js';
+import { fetchPublicHttp } from '../security/network.js';
+import { isLocalOnlyMode, resolveEffectiveProvider } from '../security/privacy.js';
 
 export interface DiagnosticCheck {
   label: string;
@@ -22,10 +26,7 @@ export interface ActiveOpenArvaConfig {
 }
 
 function resolveConfigCandidates() {
-  return [
-    path.join(process.cwd(), '.openarva', 'config.json'),
-    path.join(os.homedir(), '.openarva', 'config.json'),
-  ];
+  return [getOpenArvaConfigPath()];
 }
 
 function parseJsonFile(filePath: string): Record<string, unknown> | null {
@@ -49,19 +50,28 @@ export function getActiveOpenArvaConfig(): ActiveOpenArvaConfig {
   for (const candidate of configCandidates) {
     const parsed = parseJsonFile(candidate);
     if (parsed && typeof parsed === 'object') {
+      const provider = resolveEffectiveProvider(String(parsed.provider || envProvider));
+      const localAi = parsed.localAi as { model?: string; baseUrl?: string } | undefined;
       return {
-        provider: String((parsed.provider as string | undefined) || envProvider),
-        model: String((parsed.model as string | undefined) || envModel),
+        provider,
+        model: isLocalOnlyMode() && ['ollama', 'local', 'lmstudio'].includes(normalizeProvider(provider))
+          ? process.env.OPENARVA_MODEL || localAi?.model || process.env.OLLAMA_MODEL || 'llama3.1'
+          : String((parsed.model as string | undefined) || envModel),
         apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : undefined,
-        baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl : undefined,
+        baseUrl: isLocalOnlyMode() ? localAi?.baseUrl || parsed.baseUrl as string | undefined : parsed.baseUrl as string | undefined,
         configPath: candidate,
       };
     }
   }
 
+  const provider = resolveEffectiveProvider(envProvider);
+  const localProvider = ['ollama', 'local', 'lmstudio'].includes(normalizeProvider(provider));
   return {
-    provider: envProvider,
-    model: envModel,
+    provider,
+    model: isLocalOnlyMode() && localProvider
+      ? process.env.OPENARVA_MODEL || process.env.OLLAMA_MODEL || 'llama3.1'
+      : envModel,
+    baseUrl: isLocalOnlyMode() ? process.env.LOCAL_AI_BASE_URL || process.env.OLLAMA_BASE_URL : undefined,
     configPath: configCandidates[0],
   };
 }
@@ -72,6 +82,12 @@ function formatStatus(ok: boolean, label: string, details: string, hint?: string
   if (hint) {
     console.log(chalk.dim(`  Hint: ${hint}`));
   }
+}
+
+function isLoopbackEndpoint(input: URL) {
+  const hostname = input.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return hostname === 'localhost' ||
+    (isIP(hostname) === 4 && hostname.startsWith('127.')) || hostname === '::1';
 }
 
 async function checkHttpReachability(url: string, token?: string, authHeaderName?: string) {
@@ -85,16 +101,16 @@ async function checkHttpReachability(url: string, token?: string, authHeaderName
       }
     }
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers,
-      signal: AbortSignal.timeout(7000),
-    });
+    const target = new URL(url);
+    const signal = AbortSignal.timeout(7000);
+    const status = isLoopbackEndpoint(target)
+      ? (await fetch(target, { method: 'GET', headers, signal, redirect: 'error' })).status
+      : (await fetchPublicHttp(target.toString(), { method: 'GET', headers, signal, allowJson: true, maxRedirects: 0, maxBytes: 1_000_000, timeoutMs: 7000 })).status;
 
     return {
-      ok: response.ok,
-      status: response.status,
-      details: response.ok ? `HTTP ${response.status}` : `HTTP ${response.status}`,
+      ok: status >= 200 && status < 300,
+      status,
+      details: `HTTP ${status}`,
     };
   } catch (error) {
     return {
@@ -172,15 +188,26 @@ export async function runDoctor() {
   }
 
   const selectedProviders = new Set<string>();
-  if (process.env.OPENARVA_PROVIDER) selectedProviders.add(process.env.OPENARVA_PROVIDER);
-  if (activeConfig.provider) selectedProviders.add(activeConfig.provider);
-  if (!selectedProviders.size) selectedProviders.add('openai');
+  const localOnly = isLocalOnlyMode();
+  if (localOnly) {
+    selectedProviders.add(normalizeProvider(process.env.LOCAL_AI_PROVIDER || activeConfig.provider || 'ollama'));
+    checks.push({
+      label: 'Cloud provider probes',
+      ok: true,
+      details: 'skipped because local-only privacy mode is active',
+    });
+  } else {
+    if (process.env.OPENARVA_PROVIDER) selectedProviders.add(process.env.OPENARVA_PROVIDER);
+    if (activeConfig.provider) selectedProviders.add(activeConfig.provider);
+    if (!selectedProviders.size) selectedProviders.add('openai');
+  }
 
   for (const provider of Array.from(selectedProviders)) {
     const normalized = provider.trim().toLowerCase();
     const details = { openai: ['OPENAI_API_KEY', 'OPENAI_BASE_URL'], gemini: ['GEMINI_API_KEY', 'GEMINI_BASE_URL'], groq: ['GROQ_API_KEY', 'GROQ_BASE_URL'], deepseek: ['DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL'], anthropic: ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL'], ollama: ['LOCAL_AI_BASE_URL'] } as Record<string, string[]>;
     const requiredKeys = details[normalized] || [];
-    const hasKey = requiredKeys.some((key) => Boolean(process.env[key] || activeConfig.apiKey));
+    const isLocalProvider = ['ollama', 'local', 'lmstudio'].includes(normalizeProvider(normalized));
+    const hasKey = isLocalProvider || requiredKeys.some((key) => Boolean(process.env[key] || activeConfig.apiKey));
 
     if (!hasKey) {
       checks.push({
@@ -198,36 +225,57 @@ export async function runDoctor() {
 
     switch (normalized) {
       case 'openai':
-        endpoint = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1/models';
+        endpoint = `${(process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').replace(/\/+$/, '')}/models`;
         token = process.env.OPENAI_API_KEY || activeConfig.apiKey || '';
         break;
       case 'gemini':
-        endpoint = process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/models';
+        endpoint = `${(process.env.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai').replace(/\/+$/, '')}/models`;
         token = process.env.GEMINI_API_KEY || activeConfig.apiKey || '';
-        endpoint = token ? `${endpoint}?key=${encodeURIComponent(token)}` : endpoint;
+        header = 'x-goog-api-key';
         break;
       case 'groq':
-        endpoint = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1/models';
+        endpoint = `${(process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1').replace(/\/+$/, '')}/models`;
         token = process.env.GROQ_API_KEY || activeConfig.apiKey || '';
         break;
       case 'deepseek':
-        endpoint = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1/models';
+        endpoint = `${(process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1').replace(/\/+$/, '')}/models`;
         token = process.env.DEEPSEEK_API_KEY || activeConfig.apiKey || '';
         break;
       case 'anthropic':
-        endpoint = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1/models';
+        endpoint = `${(process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '')}/v1/models`;
         token = process.env.ANTHROPIC_API_KEY || activeConfig.apiKey || '';
         header = 'x-api-key';
         break;
       case 'ollama':
-        endpoint = process.env.LOCAL_AI_BASE_URL || 'http://localhost:11434/api/tags';
+        endpoint = (process.env.OLLAMA_BASE_URL || process.env.LOCAL_AI_BASE_URL || activeConfig.baseUrl || 'http://localhost:11434')
+          .replace(/\/v1\/?$/, '')
+          .replace(/\/+$/, '') + '/api/tags';
         token = process.env.OLLAMA_API_KEY || activeConfig.apiKey || 'ollama';
+        break;
+      case 'local':
+        endpoint = (process.env.LOCAL_AI_BASE_URL || activeConfig.baseUrl || 'http://localhost:11434')
+          .replace(/\/v1\/?$/, '')
+          .replace(/\/+$/, '') + '/api/tags';
+        token = process.env.OLLAMA_API_KEY || activeConfig.apiKey || 'ollama';
+        break;
+      case 'lmstudio':
+        endpoint = `${(process.env.LMSTUDIO_BASE_URL || activeConfig.baseUrl || 'http://localhost:1234/v1').replace(/\/+$/, '')}/models`;
+        token = process.env.LMSTUDIO_API_KEY || activeConfig.apiKey || 'lm-studio';
         break;
       default:
         endpoint = 'https://api.openai.com/v1/models';
         token = '';
     }
 
+    if (localOnly && !isLoopbackEndpoint(new URL(endpoint))) {
+      checks.push({
+        label: `${provider.toUpperCase()} connectivity`,
+        ok: false,
+        details: 'blocked: local-only mode permits only loopback model endpoints',
+        hint: 'Set the Ollama/LM Studio base URL to localhost, 127.0.0.1, or ::1.',
+      });
+      continue;
+    }
     const result = await checkHttpReachability(endpoint, token, header);
     checks.push({
       label: `${provider.toUpperCase()} connectivity`,
@@ -281,10 +329,7 @@ function renderDiffPreview(before: string, after: string) {
 }
 
 async function confirmFixPrompt() {
-  const autoApprove = process.argv.includes('--yes') || process.argv.includes('--force');
-  if (autoApprove || !process.stdin.isTTY || !process.stdout.isTTY) {
-    return true;
-  }
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
 
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const answer = await new Promise<string>((resolve) => {

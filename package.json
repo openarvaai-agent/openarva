@@ -1,16 +1,17 @@
 {
-  "name": "openarva",
-  "version": "17.6.23",
-  "description": "Enterprise Autonomous Multi-Model AI Agent Gateway Engine",
+  "name": "@openarvaai/agent",
+  "version": "17.6.24",
+  "description": "Personal AI agent for coding, research, and safety-gated automation",
   "license": "MIT",
   "main": "dist/index.js",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/fekerulegese10-arch/openarva.git"
+    "url": "git+https://github.com/openarvaai-agent/openarva.git"
   },
   "type": "module",
   "bin": {
-    "openarva": "bin/openarva.js"
+    "openarva": "bin/openarva.js",
+    "openarvaai": "bin/openarva.js"
   },
   "files": [
     "dist",
@@ -27,9 +28,9 @@
     "desktop:linux": "npm run build && electron-builder --linux"
   },
   "bugs": {
-    "url": "https://github.com/fekerulegese10-arch/openarva/issues"
+    "url": "https://github.com/openarvaai-agent/openarva/issues"
   },
-  "homepage": "https://github.com/fekerulegese10-arch/openarva#readme",
+  "homepage": "https://github.com/openarvaai-agent/openarva#readme",
   "keywords": [
     "openarva",
     "openarva-plugin",
@@ -59,8 +60,10 @@
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "grammy": "^1.26.0",
+    "imapflow": "^2.0.5",
     "jsdom": "^24.1.0",
     "linkedom": "^0.18.0",
+    "mailparser": "^3.9.28",
     "node-edge-tts": "^1.2.2",
     "openai": "^4.55.0",
     "ora": "^9.4.1",

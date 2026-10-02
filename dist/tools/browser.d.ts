@@ -1,1 +1,1 @@
-export declare function scrapeWebPage(url: string): Promise<string>;
+export declare function scrapeWebPage(url: string, signal?: AbortSignal): Promise<string>;

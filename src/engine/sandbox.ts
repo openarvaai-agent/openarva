@@ -23,9 +23,9 @@ export function validateSafeCommand(command: string, args: string[] = []) {
   return { executableName, fullCommand };
 }
 
-export function runSandboxedCommandDetailed(command: string, args: string[], cwd = process.cwd(), timeout = 120_000, repair?: (failure: import('./executor.js').TerminalAttempt) => Promise<{ command?: string; args?: string[] } | void>) {
+export function runSandboxedCommandDetailed(command: string, args: string[], cwd = process.cwd(), timeout = 120_000, repair?: (failure: import('./executor.js').TerminalAttempt) => Promise<{ command?: string; args?: string[] } | void>, signal?: AbortSignal) {
   validateSafeCommand(command, args);
-  return executeCommandDetailed(command, args, { cwd, timeoutMs: timeout, maxRetries: 3, retryDelayMs: 300, repair });
+  return executeCommandDetailed(command, args, { cwd, timeoutMs: timeout, maxRetries: 0, retryDelayMs: 300, repair, signal });
 }
 
 export function runSandboxedCommand(command: string, args: string[], cwd = process.cwd(), timeout = 120_000): Promise<string> {

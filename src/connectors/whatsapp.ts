@@ -1,4 +1,5 @@
 import type { GatewayConnector, InboundMessage, OutboundMessage } from './gateway.js';
+import { fetchPublicHttp } from '../security/network.js';
 
 function parseForm(body: string) {
   return new URLSearchParams(body);
@@ -48,12 +49,14 @@ export class WhatsAppConnector implements GatewayConnector {
       To: message.recipientId.startsWith('whatsapp:') ? message.recipientId : `whatsapp:${message.recipientId}`,
       Body: message.text,
     });
-    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}/Messages.json`, {
+    await fetchPublicHttp(`https://api.twilio.com/2010-04-01/Accounts/${this.accountSid}/Messages.json`, {
       method: 'POST',
       headers: { Authorization: `Basic ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
+      body: body.toString(),
       signal: AbortSignal.timeout(15_000),
+      allowJson: true,
+      maxBytes: 1_000_000,
+      maxRedirects: 0,
     });
-    if (!response.ok) throw new Error(`Twilio HTTP ${response.status}: ${await response.text()}`);
   }
 }

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { indexUserPreference } from '../memory/vectorStore.js';
 
 interface MemoryEntry {
   data: any;
@@ -50,13 +51,14 @@ export class OpenArvaMemory {
   }
 
   // Store learning from user feedback
-  recordUserPreference(key: string, value: any, importance: number = 5) {
+  async recordUserPreference(key: string, value: any, importance: number = 5) {
     this.userPreferences[key] = {
       value,
       importance,
       lastUpdated: new Date().toISOString()
     };
     this.persist();
+    await indexUserPreference(key, value, importance);
   }
 
   // Retrieve user preference

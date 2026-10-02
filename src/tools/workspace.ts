@@ -1,9 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import chalk from 'chalk';
-import { confirmExecutionApproval } from '../commands/state.js';
 import { parseSafeCommand, runSandboxedCommandDetailed } from '../engine/sandbox.js';
+import { runToolWithSafetyPolicy, isPolicyExecutionContext, type PolicyExecutionContext } from './executionPolicy.js';
+import { z } from 'zod';
 
 function assertWorkspacePath(filePath: string, cwd = process.cwd()) {
   const root = resolve(cwd);
@@ -28,23 +30,40 @@ export function searchWorkspace(query: string, cwd = process.cwd()) {
   return results;
 }
 
-export async function editWorkspaceFile(filePath: string, content: string, cwd = process.cwd(), autoApprove = false) {
+async function editWorkspaceFileRaw(filePath: string, content: string, cwd: string) {
   const target = assertWorkspacePath(filePath, cwd);
   const before = existsSync(target) ? readFileSync(target, 'utf8') : '';
   console.log(chalk.cyan.bold('Diff Preview'));
   if (before) console.log(chalk.red(before.split(/\r?\n/).map((line) => `- ${line}`).join('\n')));
   if (content) console.log(chalk.green(content.split(/\r?\n/).map((line) => `+ ${line}`).join('\n')));
-  if (!await confirmExecutionApproval(`modify ${target}`, autoApprove)) return false;
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content, 'utf8');
   return true;
 }
 
-export async function executeWorkspaceCommand(input: string, cwd = process.cwd(), autoApprove = false) {
-  if (!await confirmExecutionApproval(`run workspace command: ${input}`, autoApprove)) {
-    return { ok: false, cancelled: true, stdout: '', stderr: 'Execution cancelled by user.' };
-  }
+const workspaceEditInput = z.object({ path: z.string().min(1), content: z.string(), cwd: z.string().optional() }).strict();
+const workspaceCommandInput = z.object({ command: z.string().min(1), cwd: z.string().optional() }).strict();
+
+export async function editWorkspaceFile(filePath: string, content: string, cwd = process.cwd(), context?: PolicyExecutionContext) {
+  if (isPolicyExecutionContext(context)) return editWorkspaceFileRaw(filePath, content, cwd);
+  return runToolWithSafetyPolicy({
+    name: 'workspace.edit', permission: 'MODERATE', inputSchema: workspaceEditInput,
+    execute: (input) => editWorkspaceFileRaw(input.path, input.content, input.cwd || process.cwd()),
+  }, { path: filePath, content, cwd }, { taskId: randomUUID(), operationId: randomUUID(), idempotent: false });
+}
+
+async function executeWorkspaceCommandRaw(input: string, cwd: string, signal?: AbortSignal) {
   const parsed = parseSafeCommand(input);
-  const result = await runSandboxedCommandDetailed(parsed.command, parsed.args, resolve(cwd));
+  const result = await runSandboxedCommandDetailed(parsed.command, parsed.args, resolve(cwd), 120_000, undefined, signal);
   return result;
+}
+
+export async function executeWorkspaceCommand(input: string, cwd = process.cwd(), context?: PolicyExecutionContext | AbortSignal) {
+  const trustedContext = isPolicyExecutionContext(context) ? context : undefined;
+  if (trustedContext) return executeWorkspaceCommandRaw(input, cwd, trustedContext.signal);
+  const externalSignal = context instanceof AbortSignal ? context : undefined;
+  return runToolWithSafetyPolicy({
+    name: 'workspace.exec', permission: 'HIGH_RISK', inputSchema: workspaceCommandInput,
+    execute: (toolInput, toolContext) => executeWorkspaceCommandRaw(toolInput.command, toolInput.cwd || process.cwd(), toolContext.signal),
+  }, { command: input, cwd }, { taskId: randomUUID(), operationId: randomUUID(), idempotent: false, signal: externalSignal });
 }

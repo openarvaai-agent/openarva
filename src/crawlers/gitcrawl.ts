@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { indexCrawlRecords, type CrawlRecord } from '../crawlers/store.js';
+import { fetchPublicHttp } from '../security/network.js';
 
-export interface GitCrawlOptions { repository: string; token?: string; includeIssues?: boolean; includePulls?: boolean; includeCommits?: boolean; }
+export interface GitCrawlOptions { repository: string; token?: string; includeIssues?: boolean; includePulls?: boolean; includeCommits?: boolean; signal?: AbortSignal; }
 
 function repositoryPath(value: string) {
   const normalized = value.replace(/^https?:\/\/github\.com\//, '').replace(/^git@github\.com:/, '').replace(/\.git$/, '').replace(/\/$/, '');
@@ -10,10 +11,14 @@ function repositoryPath(value: string) {
   return parts.join('/');
 }
 
-async function githubGet(path: string, token?: string) {
-  const response = await fetch(`https://api.github.com/${path}`, { headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'openarva', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, signal: AbortSignal.timeout(20_000) });
-  if (!response.ok) throw new Error(`GitHub HTTP ${response.status}: ${await response.text()}`);
-  return response.json() as Promise<unknown>;
+async function githubGet(path: string, token?: string, signal?: AbortSignal) {
+  const response = await fetchPublicHttp(`https://api.github.com/${path}`, {
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'openarva', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000),
+    allowJson: true,
+    maxRedirects: 0,
+  });
+  return JSON.parse(response.body.toString('utf8')) as unknown;
 }
 
 function record(repo: string, kind: string, item: Record<string, unknown>): CrawlRecord {
@@ -26,18 +31,18 @@ function record(repo: string, kind: string, item: Record<string, unknown>): Craw
 export async function crawlGitHub(options: GitCrawlOptions) {
   const repository = repositoryPath(options.repository);
   const records: CrawlRecord[] = [];
-  const repo = await githubGet(`repos/${repository}`, options.token) as Record<string, unknown>;
+  const repo = await githubGet(`repos/${repository}`, options.token, options.signal) as Record<string, unknown>;
   records.push(record(repository, 'repository', repo));
   if (options.includeIssues !== false) {
-    const issues = await githubGet(`repos/${repository}/issues?state=all&per_page=100`, options.token) as Record<string, unknown>[];
+    const issues = await githubGet(`repos/${repository}/issues?state=all&per_page=100`, options.token, options.signal) as Record<string, unknown>[];
     records.push(...issues.filter((item) => !item.pull_request).map((item) => record(repository, 'issue', item)));
   }
   if (options.includePulls !== false) {
-    const pulls = await githubGet(`repos/${repository}/pulls?state=all&per_page=100`, options.token) as Record<string, unknown>[];
+    const pulls = await githubGet(`repos/${repository}/pulls?state=all&per_page=100`, options.token, options.signal) as Record<string, unknown>[];
     records.push(...pulls.map((item) => record(repository, 'pull_request', item)));
   }
   if (options.includeCommits !== false) {
-    const commits = await githubGet(`repos/${repository}/commits?per_page=100`, options.token) as Record<string, unknown>[];
+    const commits = await githubGet(`repos/${repository}/commits?per_page=100`, options.token, options.signal) as Record<string, unknown>[];
     records.push(...commits.map((item) => {
       const commit = item.commit as { message?: string; author?: { name?: string; date?: string } } | undefined;
       return record(repository, 'commit', { ...item, title: commit?.message?.split('\n')[0] || 'commit', message: commit?.message, author: commit?.author });

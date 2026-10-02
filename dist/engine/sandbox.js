@@ -20,9 +20,9 @@ export function validateSafeCommand(command, args = []) {
         throw new Error(`Command rejected by safety policy: ${blocked}`);
     return { executableName, fullCommand };
 }
-export function runSandboxedCommandDetailed(command, args, cwd = process.cwd(), timeout = 120_000, repair) {
+export function runSandboxedCommandDetailed(command, args, cwd = process.cwd(), timeout = 120_000, repair, signal) {
     validateSafeCommand(command, args);
-    return executeCommandDetailed(command, args, { cwd, timeoutMs: timeout, maxRetries: 3, retryDelayMs: 300, repair });
+    return executeCommandDetailed(command, args, { cwd, timeoutMs: timeout, maxRetries: 0, retryDelayMs: 300, repair, signal });
 }
 export function runSandboxedCommand(command, args, cwd = process.cwd(), timeout = 120_000) {
     return runSandboxedCommandDetailed(command, args, cwd, timeout).then((result) => {

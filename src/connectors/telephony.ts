@@ -4,6 +4,8 @@ export type SupportedCallLanguage = 'am' | 'om' | 'en';
 export interface TelephonySession { callId: string; language: SupportedCallLanguage; transcript: string[]; }
 
 export class TelephonyPipeline {
+  readonly integrationStatus = 'interface' as const;
+  readonly integrationNotice = 'Speech-to-text and text-to-speech providers must be supplied by the host application.';
   private readonly sessions = new Map<string, TelephonySession>();
   constructor(private readonly stt: SpeechToText, private readonly tts: TextToSpeech) {}
   open(callId: string, language: SupportedCallLanguage = 'en') { const session = { callId, language, transcript: [] }; this.sessions.set(callId, session); return session; }

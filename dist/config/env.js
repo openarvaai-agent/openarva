@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 dotenv.config();
 export const supportedProviders = [
     'openai',
@@ -59,6 +59,9 @@ export function getProviderConfig(provider = process.env.OPENARVA_PROVIDER || 'o
     };
 }
 export function getOpenArvaConfigPath() {
+    const configuredPath = process.env.OPENARVA_CONFIG_PATH?.trim();
+    if (configuredPath)
+        return resolve(configuredPath);
     const homeConfig = join(homedir(), '.openarva', 'config.json');
     const workspaceConfig = join(process.cwd(), '.openarva', 'config.json');
     if (existsSync(homeConfig)) {
@@ -75,7 +78,9 @@ export function loadOpenArvaConfig() {
         return {};
     }
     try {
-        return JSON.parse(readFileSync(configPath, 'utf8'));
+        const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
+        const { apiKey: _apiKey, telegramBotToken: _telegramBotToken, ...safeConfig } = parsed;
+        return safeConfig;
     }
     catch {
         return {};
@@ -84,9 +89,10 @@ export function loadOpenArvaConfig() {
 export function saveOpenArvaConfig(config) {
     const configPath = getOpenArvaConfigPath();
     mkdirSync(dirname(configPath), { recursive: true });
+    const { apiKey: _apiKey, telegramBotToken: _telegramBotToken, ...safeConfig } = config;
     writeFileSync(configPath, JSON.stringify({
-        ...config,
-        privacy: config.privacy || { localOnly: false, redactPii: true, auditLog: true },
+        ...safeConfig,
+        privacy: safeConfig.privacy || { localOnly: false, redactPii: true, auditLog: true },
     }, null, 2), 'utf8');
 }
 export const OpenArvaConfig = {

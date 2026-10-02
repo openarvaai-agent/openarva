@@ -3,6 +3,8 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 export class OpenArvaMCPServer {
+  readonly integrationStatus = 'placeholder' as const;
+  readonly registeredToolCount = 0;
   private server: Server;
 
   constructor() {
@@ -15,6 +17,6 @@ export class OpenArvaMCPServer {
   async start() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.log('[OpenArva MCP] Protocol Server Active over Stdio');
+    console.warn('[OpenArva MCP] Stdio transport active; no tools are registered, so the integration is not yet useful to clients.');
   }
 }

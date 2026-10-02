@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { indexCrawlRecords, type CrawlRecord } from './store.js';
+import { fetchPublicHttp } from '../security/network.js';
 
 export interface TelegramCrawlOptions { file?: string; token?: string; chatId?: string; }
 
@@ -18,8 +19,13 @@ export async function crawlTelegram(options: TelegramCrawlOptions = {}) {
     messages = Array.isArray(parsed) ? parsed : parsed.messages || [];
   } else if (options.token) {
     const query = options.chatId ? `?chat_id=${encodeURIComponent(options.chatId)}` : '';
-    const response = await fetch(`https://api.telegram.org/bot${options.token}/getUpdates${query}`, { signal: AbortSignal.timeout(20_000) });
-    const payload = await response.json() as { ok: boolean; result?: Array<{ message?: Record<string, unknown> }> };
+    const response = await fetchPublicHttp(`https://api.telegram.org/bot${options.token}/getUpdates${query}`, {
+      signal: AbortSignal.timeout(20_000),
+      allowJson: true,
+      maxBytes: 1_000_000,
+      maxRedirects: 0,
+    });
+    const payload = JSON.parse(response.body.toString('utf8')) as { ok: boolean; result?: Array<{ message?: Record<string, unknown> }> };
     if (!payload.ok) throw new Error('Telegram getUpdates failed. Check TELEGRAM_BOT_TOKEN.');
     messages = (payload.result || []).flatMap((item) => item.message ? [item.message] : []);
   } else {

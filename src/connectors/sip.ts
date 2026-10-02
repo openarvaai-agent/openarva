@@ -6,6 +6,8 @@ export interface TextToSpeech { synthesize(text: string, language: string): Prom
 export interface SipCall { callId: string; caller: string; language?: string; startedAt: string; }
 
 export class SipConnector {
+  readonly integrationStatus = 'interface' as const;
+  readonly integrationNotice = 'SIP transport and media negotiation are not implemented; inject audio frames from an external SIP stack.';
   readonly channel = 'sip' as const;
   private readonly calls = new Map<string, SipCall>();
   constructor(private readonly stt: SpeechToText, private readonly tts: TextToSpeech) {}

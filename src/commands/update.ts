@@ -1,6 +1,9 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { providerModelDefaults, type OpenArvaProviderName } from '../config/env.js';
+import { isIP } from 'node:net';
+import { fetchPublicHttp } from '../security/network.js';
+import { isLocalOnlyMode } from '../security/privacy.js';
 
 const execFileAsync = promisify(execFile);
 const trackedProviders: OpenArvaProviderName[] = ['gemini', 'openai', 'anthropic', 'groq', 'deepseek', 'ollama'];
@@ -13,10 +16,32 @@ export interface ModelUpdateResult {
   detail?: string;
 }
 
-async function fetchJson(url: string, headers: Record<string, string> = {}) {
-  const response = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  return response.json() as Promise<Record<string, unknown>>;
+function assertLoopbackOllamaUrl(input: string) {
+  const url = new URL(input);
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const loopback = hostname === 'localhost' || (isIP(hostname) === 4 && hostname.startsWith('127.')) || hostname === '::1';
+  if (!['http:', 'https:'].includes(url.protocol) || !loopback || url.username || url.password) {
+    throw new Error('Ollama model discovery and benchmarking only allow a loopback endpoint.');
+  }
+  return url;
+}
+
+async function fetchJson(url: string, headers: Record<string, string> = {}, localOnly = false) {
+  if (localOnly) {
+    assertLoopbackOllamaUrl(url);
+    const response = await fetch(url, { headers, signal: AbortSignal.timeout(8000), redirect: 'error' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json() as Promise<Record<string, unknown>>;
+  }
+  const response = await fetchPublicHttp(url, {
+    headers,
+    signal: AbortSignal.timeout(8000),
+    allowJson: true,
+    maxRedirects: 0,
+    maxBytes: 2_000_000,
+    timeoutMs: 8000,
+  });
+  return JSON.parse(response.body.toString('utf8')) as Record<string, unknown>;
 }
 
 function apiHeaders(provider: string): Record<string, string> {
@@ -30,7 +55,7 @@ function apiHeaders(provider: string): Record<string, string> {
 async function discoverProviderModels(provider: OpenArvaProviderName): Promise<ModelUpdateResult> {
   if (provider === 'ollama') {
     const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/v1\/?$/, '');
-    const data = await fetchJson(`${baseUrl}/api/tags`);
+    const data = await fetchJson(`${baseUrl}/api/tags`, {}, true);
     const models = Array.isArray(data.models)
       ? data.models.flatMap((model) => typeof model === 'object' && model && 'name' in model ? [String(model.name)] : [])
       : [];
@@ -52,7 +77,8 @@ async function discoverProviderModels(provider: OpenArvaProviderName): Promise<M
 }
 
 export async function discoverModels(): Promise<ModelUpdateResult[]> {
-  return Promise.all(trackedProviders.map(async (provider) => {
+  const providers = isLocalOnlyMode() ? ['ollama' as const] : trackedProviders;
+  return Promise.all(providers.map(async (provider) => {
     try {
       return await discoverProviderModels(provider);
     } catch (error) {
@@ -83,6 +109,7 @@ export async function pullOllamaModels(models: string[]) {
 
 export async function benchmarkOllama() {
   const baseUrl = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replace(/\/v1\/?$/, '');
+  assertLoopbackOllamaUrl(baseUrl);
   const model = process.env.OPENARVA_MODEL || providerModelDefaults.ollama[0];
   const started = Date.now();
   try {
@@ -91,6 +118,7 @@ export async function benchmarkOllama() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, prompt: 'ping', stream: false }),
       signal: AbortSignal.timeout(30000),
+      redirect: 'error',
     });
     return `${model}: ${Date.now() - started}ms response`;
   } catch (error) {

@@ -1,4 +1,6 @@
 import type { GatewayConnector, InboundMessage, OutboundMessage } from './gateway.js';
+import { fetchPublicHttp } from '../security/network.js';
+import { FixedWindowRateLimiter } from '../security/rateLimit.js';
 
 interface TelegramUpdate {
   update_id: number;
@@ -16,12 +18,19 @@ export class TelegramConnector implements GatewayConnector {
   private readonly token = process.env.TELEGRAM_BOT_TOKEN || '';
   private offset = 0;
   private stopping = false;
+  private allowedChats = new Set<string>();
+  private readonly rateLimiter = new FixedWindowRateLimiter(30, 60_000);
   private onMessage: ((message: InboundMessage) => Promise<void>) | null = null;
 
   async start(onMessage: (message: InboundMessage) => Promise<void>) {
     this.onMessage = onMessage;
     if (!this.token) {
       console.log('Telegram connector disabled: TELEGRAM_BOT_TOKEN is not configured.');
+      return;
+    }
+    this.allowedChats = new Set((process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map((id) => id.trim()).filter(Boolean));
+    if (!this.allowedChats.size) {
+      console.warn('Telegram inbound processing disabled: configure TELEGRAM_ALLOWED_CHAT_IDS with trusted chat IDs.');
       return;
     }
     this.stopping = false;
@@ -54,9 +63,14 @@ export class TelegramConnector implements GatewayConnector {
           const text = update.message?.text?.trim();
           const senderId = update.message?.chat?.id;
           if (!text || senderId === undefined || !this.onMessage) continue;
+          const chatId = String(senderId);
+          if (!this.allowedChats.has(chatId) || !this.rateLimiter.allow(chatId)) {
+            console.warn(`Telegram message ignored for unauthorized or rate-limited chat ${chatId}.`);
+            continue;
+          }
           await this.onMessage({
             channel: 'telegram',
-            senderId: String(senderId),
+            senderId: chatId,
             text,
             receivedAt: new Date().toISOString(),
           });
@@ -77,14 +91,17 @@ export class TelegramConnector implements GatewayConnector {
   }
 
   private async call<T = unknown>(method: string, payload: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, {
+    const response = await fetchPublicHttp(`https://api.telegram.org/bot${this.token}/${method}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(35_000),
+      signal: AbortSignal.timeout(30_000),
+      allowJson: true,
+      maxBytes: 1_000_000,
+      maxRedirects: 0,
     });
-    const data = await response.json() as TelegramResponse<T>;
-    if (!response.ok || !data.ok) throw new Error(data.description || `Telegram HTTP ${response.status}`);
+    const data = JSON.parse(response.body.toString('utf8')) as TelegramResponse<T>;
+    if (!data.ok) throw new Error(data.description || `Telegram HTTP ${response.status}`);
     return data.result;
   }
 }

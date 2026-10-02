@@ -1,4 +1,4 @@
-export type SensitiveDataType = 'credit_card' | 'bank_account' | 'pin' | 'national_id' | 'email' | 'phone';
+export type SensitiveDataType = 'credit_card' | 'bank_account' | 'pin' | 'national_id' | 'email' | 'phone' | 'secret';
 
 export interface Redaction { type: SensitiveDataType; start: number; end: number; replacement: string; }
 
@@ -16,6 +16,7 @@ function luhn(value: string) {
 
 function mask(type: SensitiveDataType, value: string) {
   if (type === 'credit_card') return `[REDACTED_CREDIT_CARD:${value.replace(/\D/g, '').slice(-4)}]`;
+  if (type === 'secret') return '[REDACTED_SECRET]';
   return `[REDACTED_${type.toUpperCase()}]`;
 }
 
@@ -27,6 +28,9 @@ export function findSensitiveData(input: string): Redaction[] {
     ['national_id', /\b(?:national[ -]?id|tax[ -]?id|ssn|身份证|የመታወቂያ)[\s:#-]*[A-Z0-9-]{5,24}\b/giu],
     ['email', /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi],
     ['phone', /\b(?:\+?\d{1,3}[ -]?)?(?:\(?\d{2,4}\)?[ -]?)?\d{3}[ -]?\d{3,4}[ -]?\d{3,4}\b/g],
+    ['secret', /\b(?:[A-Z0-9_]*(?:API_KEY|BOT_TOKEN|AUTH_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN|CLIENT_SECRET|PASSWORD|SECRET)|api[ _-]?key|access[ _-]?token|refresh[ _-]?token|client[ _-]?secret|password|authorization)\s*[:=]\s*(?:Bearer\s+)?["']?[^\s"',;]+["']?/gi],
+    ['secret', /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi],
+    ['secret', /\b\d{6,12}:[A-Za-z0-9_-]{20,}\b/g],
   ];
   const redactions: Redaction[] = [];
   for (const [type, pattern] of patterns) {

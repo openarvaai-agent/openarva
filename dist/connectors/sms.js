@@ -4,11 +4,11 @@ const twilio = require('twilio');
 const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const client = twilio(accountSid, authToken);
+export const smsIntegrationStatus = 'partial';
 export async function handleIncomingSMS(req, res) {
     const incomingMsg = req.body.Body;
     const senderNumber = req.body.From;
-    // AI Agent Processing simulation
-    const replyText = `📱 [OpenArva SMS]: Your message was received and is being processed. Reply soon!`;
+    const replyText = 'OpenArva received your SMS. Automated SMS agent responses are not implemented yet.';
     await client.messages.create({
         body: replyText,
         from: process.env.TWILIO_PHONE_NUMBER,

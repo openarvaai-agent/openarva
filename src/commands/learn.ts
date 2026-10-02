@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync, mkdirSync
 import { join, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { sanitizePromptForTransmission, recordAudit } from '../security/privacy.js';
+import { indexMemoryDocumentsAsync, type MemoryDocument } from '../memory/vectorStore.js';
 
 export interface MemoryRecord {
   id: string;
@@ -54,7 +55,7 @@ function extractTextFromFile(filePath: string) {
   return sanitizePromptForTransmission(raw, 'ollama');
 }
 
-export function indexMemoryFromDirectory(targetDir: string) {
+export async function indexMemoryFromDirectory(targetDir: string) {
   const root = targetDir || process.cwd();
   if (!existsSync(root)) {
     throw new Error(`Directory not found: ${root}`);
@@ -62,6 +63,7 @@ export function indexMemoryFromDirectory(targetDir: string) {
 
   const records = loadMemoryIndex();
   const files = listFilesRecursively(root);
+  const vectorDocuments: MemoryDocument[] = [];
 
   for (const file of files) {
     const text = extractTextFromFile(file);
@@ -74,9 +76,16 @@ export function indexMemoryFromDirectory(targetDir: string) {
       text,
       createdAt: new Date().toISOString(),
     });
+    vectorDocuments.push({
+      id,
+      source: 'codebase',
+      text: `${file}\n${text}`,
+      metadata: { file },
+    });
   }
 
   saveMemoryIndex(records);
+  await indexMemoryDocumentsAsync(vectorDocuments);
   recordAudit('learn_index', `Indexed ${files.length} files from ${root}`);
   return records;
 }

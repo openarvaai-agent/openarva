@@ -9,6 +9,7 @@ Usage: openarva [command] [options]
 Commands:
   init, setup     Start the interactive setup wizard
   run             Run a task in a domain
+  resume          Resume an autonomous task by ID, or use --pending
   doctor          Run environment and provider diagnostics
   fix             Diagnose and repair repository issues safely
   status          Show provider, model, port, and bridge status
@@ -52,6 +53,9 @@ Examples:
   openarva serve --port 3000
   openarva fix "Resolve TypeScript errors"
   openarva run --domain coding --instruction "Build a simple API"
+  openarva run --autonomous --instruction "Research this repository and report risks"
+  openarva resume <task-id>
+  openarva resume --pending
   openarva gateway start
   openarva gateway stop
   openarva gateway status
@@ -64,7 +68,7 @@ Supported providers:
 Community & support:
   Telegram: https://t.me/openrva177
   WhatsApp: https://whatsapp.com/channel/0029Vb8TDKr72WTmtjfWju2s
-  Issues: https://github.com/fekerulegese10-arch/openarva/issues
+  Issues: https://github.com/openarvaai-agent/openarva/issues
 
 Environment auto-detection:
   Flutter/Dart, Node.js/TypeScript, Python, Go, Rust
@@ -96,22 +100,6 @@ export async function runOnboarding() {
         defaultValue: selectedProvider === 'openai' ? 'gpt-4o' : selectedProvider === 'anthropic' ? 'claude-3-5-sonnet' : selectedProvider === 'gemini' ? 'gemini-2.0-flash' : selectedProvider === 'groq' ? 'llama-3.3-70b-versatile' : selectedProvider === 'deepseek' ? 'deepseek-chat' : 'llama3.1',
     });
     const model = typeof modelResult === 'string' ? modelResult : String(modelResult);
-    const keyPromptMap = {
-        openai: 'OpenAI API key (optional)',
-        anthropic: 'Anthropic API key (optional)',
-        gemini: 'Gemini API key (optional)',
-        groq: 'Groq API key (optional)',
-        deepseek: 'DeepSeek API key (optional)',
-        ollama: 'Ollama API key (optional; usually not required)',
-        local: 'Local AI API key (optional; usually not required)',
-        lmstudio: 'LM Studio API key (optional; usually not required)',
-    };
-    const keyValue = await text({
-        message: keyPromptMap[selectedProvider],
-        placeholder: selectedProvider === 'openai' ? 'sk-...' : 'key...',
-        defaultValue: '',
-    });
-    const apiKey = typeof keyValue === 'string' ? keyValue : String(keyValue);
     const baseUrlValue = await text({
         message: 'Base URL (optional, for OpenAI-compatible endpoints or local servers)',
         placeholder: selectedProvider === 'ollama' || selectedProvider === 'local' ? 'http://localhost:11434/v1' : selectedProvider === 'lmstudio' ? 'http://localhost:1234/v1' : 'https://api.example.com/v1',
@@ -150,11 +138,6 @@ export async function runOnboarding() {
         });
         localAi = { enabled: true, baseUrl: String(localUrl), model: String(localModel) };
     }
-    const telegramToken = await text({
-        message: 'Telegram bot token (optional; leave blank to skip)',
-        placeholder: '123456:token-from-BotFather',
-        defaultValue: '',
-    });
     const repositoryPaths = await text({
         message: 'Repository paths to index later (optional, comma-separated)',
         placeholder: 'C:/projects/app, ./workspace',
@@ -163,17 +146,15 @@ export async function runOnboarding() {
     const config = {
         provider: selectedProvider,
         model: model,
-        apiKey: apiKey || undefined,
         baseUrl: baseUrl || undefined,
         organizationName: typeof organizationName === 'string' ? organizationName : String(organizationName || ''),
         developerId: typeof developerId === 'string' ? developerId : String(developerId || ''),
         localAi,
-        telegramBotToken: typeof telegramToken === 'string' && telegramToken ? telegramToken : undefined,
         repositoryPaths: typeof repositoryPaths === 'string' && repositoryPaths.trim()
             ? repositoryPaths.split(',').map((item) => item.trim()).filter(Boolean)
             : [],
     };
     saveOpenArvaConfig(config);
-    note(`Default provider saved to .openarva/config.json\nProvider: ${selectedProvider}\nModel: ${model}`, 'Setup complete');
+    note(`Provider settings saved to .openarva/config.json\nProvider credentials are read from your ignored .env file.\nProvider: ${selectedProvider}\nModel: ${model}`, 'Setup complete');
     outro('OpenArva is ready. Run: openarva run --domain coding --instruction "Build a simple API"');
 }

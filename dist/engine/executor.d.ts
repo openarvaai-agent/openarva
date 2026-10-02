@@ -6,6 +6,7 @@ export interface TerminalExecutionOptions {
     retryDelayMs?: number;
     maxOutputBytes?: number;
     shell?: boolean;
+    signal?: AbortSignal;
     repair?: (failure: TerminalAttempt) => Promise<{
         command?: string;
         args?: string[];

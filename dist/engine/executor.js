@@ -14,6 +14,7 @@ async function runAttempt(command, args, options, attempt) {
                 cwd: options.cwd,
                 env: options.env,
                 shell: options.shell,
+                signal: options.signal,
                 windowsHide: true,
                 stdio: ['ignore', 'pipe', 'pipe'],
             });
@@ -53,6 +54,7 @@ export async function executeCommandDetailed(command, args = [], options = {}) {
         timeoutMs: clampPositive(options.timeoutMs, 120_000),
         maxOutputBytes: clampPositive(options.maxOutputBytes, 200_000),
         shell: options.shell ?? false,
+        signal: options.signal,
     };
     const history = [];
     let currentCommand = command;
